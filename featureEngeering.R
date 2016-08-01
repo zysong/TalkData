@@ -2,7 +2,6 @@ library(data.table)
 library(dplyr)
 library(stringr)
 library(ggplot2)
-library(caret)
 library(useful)
 library(mice)
 require(bit64)
@@ -74,6 +73,7 @@ installation_byDeviceLabel <- device_labels_installed %>% group_by(device_id, la
 label_installed_wide<-dcast(installation_byDeviceLabel, as.factor(device_id)~as.factor(label_id), 
                             value.var="n_app", fill=0)
 names(label_installed_wide)[1]<-'device_id'
+label_installed_wide$device_id<-as.character(label_installed_wide$device_id)
 remove(device_labels_installed, installation_byDeviceLabel)
 #active apps
 device_labels_active <- device_apps %>% select(device_id, app_id, is_active) %>% 
@@ -84,6 +84,7 @@ active_byDeviceLabel <- device_labels_active %>% group_by(device_id, label_id) %
 #  arrange(desc(n_app)) %>% summarise(label1=label_id[1])
 label_active_wide<-dcast(active_byDeviceLabel, as.factor(device_id)~as.factor(label_id), 
                          value.var="n_app", fill=0)
+label_active_wide$device_id<-as.character(label_active_wide$device_id)
 names(label_active_wide)[1]<-'device_id'
 remove(device_labels_active, active_byDeviceLabel)
 
@@ -100,7 +101,7 @@ pca.label.active<-prcomp(label_active_wide[,-1], scale. = sd.active, center = TR
 #screeplot(pca.label.active)
 device_label_pc<-as.data.frame(cbind(pca.label.installed$x[,1:5], pca.label.active$x[,1:5]))
 names(device_label_pc)<- c(paste0(rep("PC", 5), 1:5, ".ins"), paste0(rep("PC", 5), 1:5, ".act"))
-device_label_pc$device_id<-as.integer64(as.character(label_active_wide$device_id))
+device_label_pc$device_id<-label_active_wide$device_id
 
 #find the most common category
 #label_cat<-fread("label_categories.csv")
@@ -112,23 +113,16 @@ device_label_pc$device_id<-as.integer64(as.character(label_active_wide$device_id
 #ggplot(events_byLabel, aes(x = label_id, y = count)) +
 #  geom_point()
 
-gender_age_train<-fread("gender_age_train.csv")
-gender_age_test<-fread("gender_age_test.csv")
-sample_sub<-fread("sample_submission.csv")
-
 brand_model<-fread("phone_brand_device_model.csv")
 brand_model$device_id<-as.character(brand_model$device_id)
 brand_model<-distinct(brand_model[complete.cases(brand_model)])
-
-train_with_events<-semi_join(gender_age_train, events_byDevice, by="device_id")
-train_without_events<-anti_join(gender_age_train, events_byDevice, by="device_id")
-test_with_events<-semi_join(gender_age_test, events_byDevice, by="device_id")
-test_without_events<-anti_join(gender_age_test, events_byDevice, by="device_id")
+brand_model<-brand_model[!duplicated(brand_model$device_id),]
 
 pred<-list(events_byDevice, device_apps_installed, device_apps_active, 
            device_label_pc, device_hours, device_loc, brand_model) %>%
   Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="device_id"), .)
 
 md.pattern(pred)
+pred.imp
 
-sum(is.na(events_byDevice$device_id))
+write.csv(pred, "predictors.csv")
