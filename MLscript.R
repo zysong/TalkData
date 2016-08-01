@@ -7,9 +7,9 @@ require(bit64)
 
 pred<-fread("predictors.csv", stringsAsFactors = TRUE)
 pred$device_id<-as.character(pred$device_id)
-gender_age_train<-fread("gender_age_train.csv", stringsAsFactors = TRUE)
+gender_age_train<-fread("./Data/gender_age_train.csv", stringsAsFactors = TRUE)
 gender_age_train$device_id<-as.character(gender_age_train$device_id)
-gender_age_test<-fread("gender_age_test.csv")
+gender_age_test<-fread("./Data/gender_age_test.csv")
 gender_age_test$device_id<-as.character(gender_age_test$device_id)
 sample_sub<-fread("sample_submission.csv")
 

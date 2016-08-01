@@ -6,7 +6,7 @@ library(useful)
 library(mice)
 require(bit64)
 
-events<-fread("events.csv")
+events<-fread("./Data/events.csv")
 events$device_id<-as.character(events$device_id)
 events$event_id<-as.character(events$event_id)
 #head(events)
@@ -49,10 +49,10 @@ remove(events.com)
 #  geom_point()
 
 #join devices and labels
-app_events<-fread("app_events.csv")
+app_events<-fread("./Data/app_events.csv")
 app_events$event_id<-as.character(app_events$event_id)
 app_events$app_id<-as.character(app_events$app_id)
-app_label<-fread("app_labels.csv")
+app_label<-fread("./Data/app_labels.csv")
 app_label$app_id<-as.character(app_label$app_id)
 #head(app_events, 10)
 device_apps<-events %>% select(c(device_id, event_id)) %>% 
@@ -104,7 +104,7 @@ names(device_label_pc)<- c(paste0(rep("PC", 5), 1:5, ".ins"), paste0(rep("PC", 5
 device_label_pc$device_id<-label_active_wide$device_id
 
 #find the most common category
-#label_cat<-fread("label_categories.csv")
+#label_cat<-fread("./Data/label_categories.csv")
 #label_cat$category[events_byLabel$label_id[which.max(events_byLabel$count)]]
 
 #gender_age_events_apps<-inner_join(gender_age_events, app_events, by="event_id")
@@ -113,7 +113,7 @@ device_label_pc$device_id<-label_active_wide$device_id
 #ggplot(events_byLabel, aes(x = label_id, y = count)) +
 #  geom_point()
 
-brand_model<-fread("phone_brand_device_model.csv")
+brand_model<-fread("./Data/phone_brand_device_model.csv")
 brand_model$device_id<-as.character(brand_model$device_id)
 brand_model<-distinct(brand_model[complete.cases(brand_model)])
 brand_model<-brand_model[!duplicated(brand_model$device_id),]
