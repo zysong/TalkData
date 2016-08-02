@@ -31,13 +31,16 @@ device_loc<-events_byDeviceLocation %>% group_by(device_id) %>%
   summarise(longitude1=longitude[which.max(n_events)], latitude1=latitude[which.max(n_events)], 
             max.dist=max(as.matrix(dist(cbind(longitude, latitude), diag=TRUE))))
 
+
 events_byDevice<-events %>% group_by(device_id) %>% summarise(n_events=n())
 #head(events_byDevice)
 #hist(events_byDevice$n_events, xlim = c(0, 1000), breaks = 5000)
 #events_byDate<-events %>% group_by(date) %>% summarise(n_events=n())
 events_byDeviceHour<-events %>% group_by(device_id, hour) %>% summarise(n_events=n())
-device_hours<-events_byDeviceHour %>% group_by(device_id) %>% arrange(desc(n_events)) %>% 
-  summarise(hour1=hour[1], hour2=hour[2], distinct_hours=n_distinct(hour))
+#device_hours<-events_byDeviceHour %>% group_by(device_id) %>% arrange(desc(n_events)) %>% 
+#  summarise(hour1=hour[1], hour2=hour[2], distinct_hours=n_distinct(hour))
+device_hours<-dcast(events_byDeviceHour, device_id~hour, value.var="n_events", fill=0)
+names(device_hours)<- c("device_id", paste0(rep("h", 24), 0:23))
 remove(events.com)
 
 #plot the temporal pattern of events per device for each group of users
@@ -123,6 +126,13 @@ pred<-list(events_byDevice, device_apps_installed, device_apps_active,
   Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="device_id"), .)
 
 md.pattern(pred)
-pred.imp
+pred$n_app_active[is.na(pred$n_app_active)]<-0
+pred<-pred %>% subset(!is.na(n_app_installed))
+pred.no.idx<-select(pred, -c(V1, device_id))
+set.seed(100)
+pred.imp<-mice(pred.no.idx, m = 1)
+pred.com<-complete(pred.imp)
+pred<-cbind(V1=pred$V1, device_id=pred$device_id, pred.com)
+remove(pred.imp)
 
 write.csv(pred, "predictors.csv")
