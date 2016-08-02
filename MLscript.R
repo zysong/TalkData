@@ -21,6 +21,7 @@ brand_model<-fread("./Data/phone_brand_device_model.csv", stringsAsFactors = TRU
 brand_model$device_id<-as.character(brand_model$device_id)
 brand_model<-distinct(brand_model[complete.cases(brand_model)])
 brand_model<-brand_model[!duplicated(brand_model$device_id),]
+brand_model$device_model<-paste(brand_model$phone_brand, brand_model$device_model, sep="-")
 
 train_with_events<-inner_join(gender_age_train, pred, by="device_id")
 pred.train<-train_with_events[,-(1:5)]
