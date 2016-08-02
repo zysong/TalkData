@@ -121,18 +121,20 @@ brand_model$device_id<-as.character(brand_model$device_id)
 brand_model<-distinct(brand_model[complete.cases(brand_model)])
 brand_model<-brand_model[!duplicated(brand_model$device_id),]
 
+#combine all predictors
 pred<-list(events_byDevice, device_apps_installed, device_apps_active, 
            device_label_pc, device_hours, device_loc, brand_model) %>%
   Reduce(function(dtf1,dtf2) left_join(dtf1,dtf2,by="device_id"), .)
 
 md.pattern(pred)
+#missing data
 pred$n_app_active[is.na(pred$n_app_active)]<-0
 pred<-pred %>% subset(!is.na(n_app_installed))
-pred.no.idx<-select(pred, -c(V1, device_id))
+pred.no.idx<-select(pred, -device_id)
 set.seed(100)
 pred.imp<-mice(pred.no.idx, m = 1)
 pred.com<-complete(pred.imp)
-pred<-cbind(V1=pred$V1, device_id=pred$device_id, pred.com)
+pred<-cbind(device_id=pred$device_id, pred.com)
 remove(pred.imp)
 
 write.csv(pred, "predictors.csv")
