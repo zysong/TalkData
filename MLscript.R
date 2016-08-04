@@ -6,7 +6,7 @@ library(xgboost)
 library(mice)
 require(bit64)
 
-pred<-fread("predictors.csv", stringsAsFactors = TRUE)
+pred<-fread("predictors.csv")
 pred$device_id<-as.character(pred$device_id)
 
 gender_age_train<-fread("./Data/gender_age_train.csv", stringsAsFactors = TRUE)
@@ -40,24 +40,24 @@ train_with_events<-inner_join(gender_age_train, pred, by="device_id")
 pred.train<-train_with_events[,-(1:5)]
 train_without_events<-inner_join(gender_age_train, brand_model, by="device_id")
 pred.train.without.events<-train_without_events[,-(1:4)]
-train_without_events.top20<-inner_join(gender_age_train, brand_model.top20, by="device_id")
-pred.train.without.events.top20<-train_without_events.top20[,-(1:4)]
+#train_without_events.top20<-inner_join(gender_age_train, brand_model.top20, by="device_id")
+#pred.train.without.events.top20<-train_without_events.top20[,-(1:4)]
 test_with_events<-inner_join(gender_age_test, pred, by="device_id")
 pred.test<-test_with_events[,-(1:2)]
 test_without_events<-gender_age_test %>% left_join(brand_model, by="device_id")
 pred.test.without.events<-test_without_events[,-1]
 
-train()
-lm.age.brand.top20<-lm(age~phone_brand, data=train_without_events.top20)
-summary(lm.age.brand.top20)
-lm.age<-lm(age~phone_brand, data=train_without_events)
-step(lm.age)
+lm.age<-lm(age~phone_brand+device_model, data=train_without_events)
 summary.lm.age<-summary(lm.age)
+p.brand<-summary(lm.age)$coefficients[,4]
 age.pred<-predict(lm.age, pred.test.without.events)
-
-brand_model.dummy<-dummyVars(~phone_brand + device_model, data=rbind(pred.train.without.events, pred.test.without.events))
-brand_model.train<-predict(brand_model.dummy, newdata = pred.train.without.events)
+glm.gender<-glm(gender~phone_brand+device_model, family = "binomial", data=train_without_events)
+summary.glm.gender<-summary(glm.gender)
+p.
+brand_model.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events, pred.test.without.events))
+brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events))
 brand_model.test<-predict(brand_model.dummy, newdata = pred.test.without.events)
+
 
 rf.cv<- rfcv(brand_model.train, class.train.without.events, cv.fold=10)
 rf<-randomForest(pred.train, class.train, nree=1000, importance = TRUE)
