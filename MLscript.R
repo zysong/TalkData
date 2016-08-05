@@ -4,6 +4,7 @@ library(data.table)
 library(randomForest)
 library(xgboost)
 library(mice)
+library(MASS)
 require(bit64)
 
 pred<-fread("predictors.csv")
@@ -53,6 +54,10 @@ models_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>%
 brands_test_only<-n_byBrand %>% semi_join(test_without_events, by="phone_brand") %>% anti_join(train_without_events, by="phone_brand")
 models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model") %>% anti_join(train_without_events, by="device_model")
 
+lm.age<-lm(age~phone_brand+device_model, data=train_without_events.top20)
+p.pred.age<-summary(lm.age)$coefficients[,4]
+brands.age<-lm.age$xlevels$phone_brand[p.pred.age<0.05]
+models.age<-lm.age$xlevels$device_model[p.pred.age<0.05]
 
 lm.age.brand<-lm(age~phone_brand, data=train_without_events.top20)
 p.brand.age<-summary(lm.age.brand)$coefficients[,4]
@@ -67,6 +72,10 @@ brands.gender<-glm.gender.brand$xlevels$phone_brand[p.brand.gender<0.05]
 glm.gender.model<-glm(gender~device_model, family = "binomial", data=train_without_events.top20)
 p.model.gender<-summary(glm.gender.model)$coefficients[,4]
 models.gender<-glm.gender.model$xlevels$device_model[p.model.gender<0.05]
+
+lda.brand<-lda(group~phone_brand, data = train_without_events.top20, CV=TRUE)
+lda.brand_model<-lda(group~phone_brand+device_model, data = train_without_events.top20, CV=TRUE)
+
 
 brand_model.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events, pred.test.without.events))
 brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events))
