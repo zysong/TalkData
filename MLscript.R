@@ -48,6 +48,8 @@ pred.test.without.events<-test_without_events[,-1]
 test_without_events.top20<-gender_age_test %>% left_join(brand_model.top20, by="device_id")
 pred.test.without.events.top20<-test_without_events.top20[,-1]
 
+models_byBrand_train <- train_without_events.top20 %>% group_by(phone_brand) %>% summarise(n_model=n_distinct(device_model))
+
 brands_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>% group_by(phone_brand) %>% 
   summarise(n_devices=n()) %>% arrange(desc(n_devices))
 models_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>% group_by(device_model) %>% 
@@ -58,18 +60,20 @@ models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model"
 brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
 brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.top20))
 brand_model.test<-predict(brand_model.dummy, newdata = pred.test.without.events.top20)
-brand_model.train.preProcess<-preProcess(brand_model.train)
-brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
-brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
+brand.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
+brand.train<-predict(brand.dummy, pred.train.without.events.top20)
+#brand_model.train.preProcess<-preProcess(brand_model.train)
+#brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
+#brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
 
 ctrl<-trainControl(method = "cv", number = 10, returnResamp = "final", 
-                   summaryFunction = multiClassSummary, classProbs = TRUE)
+                   summaryFunction = mnLogLoss, classProbs = TRUE)
 set.seed(101)
-ldaFit<-train(x = brand_model.train, 
+ldaFit<-train(x = brand.train, 
               y = make.names(train_without_events$group),
               method = "lda2",
               preProcess = c("center", "scale"),
-              metric = "mlogloss",
+              metric = "logLoss",
               trControl = ctrl)
 
 lm.age<-lm(age~phone_brand+device_model, data=train_without_events.top20)
