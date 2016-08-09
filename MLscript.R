@@ -6,6 +6,7 @@ library(xgboost)
 library(mice)
 library(MASS)
 require(bit64)
+require(e1071)
 
 pred<-fread("predictors.csv")
 pred$device_id<-as.character(pred$device_id)
@@ -54,6 +55,23 @@ models_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>%
 brands_test_only<-n_byBrand %>% semi_join(test_without_events, by="phone_brand") %>% anti_join(train_without_events, by="phone_brand")
 models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model") %>% anti_join(train_without_events, by="device_model")
 
+brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
+brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.top20))
+brand_model.test<-predict(brand_model.dummy, newdata = pred.test.without.events.top20)
+brand_model.train.preProcess<-preProcess(brand_model.train)
+brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
+brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
+
+ctrl<-trainControl(method = "cv", number = 10, returnResamp = "final", 
+                   summaryFunction = multiClassSummary, classProbs = TRUE)
+set.seed(101)
+ldaFit<-train(x = brand_model.train, 
+              y = make.names(train_without_events$group),
+              method = "lda2",
+              preProcess = c("center", "scale"),
+              metric = "mlogloss",
+              trControl = ctrl)
+
 lm.age<-lm(age~phone_brand+device_model, data=train_without_events.top20)
 p.pred.age<-summary(lm.age)$coefficients[,4]
 brands.age<-lm.age$xlevels$phone_brand[p.pred.age<0.05]
@@ -77,9 +95,7 @@ lda.brand<-lda(group~phone_brand, data = train_without_events.top20, CV=TRUE)
 lda.brand_model<-lda(group~phone_brand+device_model, data = train_without_events.top20, CV=TRUE)
 
 
-brand_model.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events, pred.test.without.events))
-brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events))
-brand_model.test<-predict(brand_model.dummy, newdata = pred.test.without.events)
+
 
 
 rf.cv<- rfcv(brand_model.train, class.train.without.events, cv.fold=10)
