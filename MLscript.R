@@ -59,22 +59,28 @@ models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model"
 
 brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
 brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.top20))
-brand_model.test<-predict(brand_model.dummy, newdata = pred.test.without.events.top20)
+brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.top20))
+brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
+brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
 brand.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
-brand.train<-predict(brand.dummy, pred.train.without.events.top20)
+brand.train<-as.data.frame(predict(brand.dummy, pred.train.without.events.top20))
+brand.train<-dplyr::select(brand.train, -phone_brandminor_brand)
 #brand_model.train.preProcess<-preProcess(brand_model.train)
 #brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
 #brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
 
-ctrl<-trainControl(method = "cv", number = 10, returnResamp = "final", 
-                   summaryFunction = mnLogLoss, classProbs = TRUE)
+ctrl<-trainControl(method = "repeatedcv", number = 10, repeats = 3,
+                   summaryFunction = multiClassSummary, classProbs = TRUE)
 set.seed(101)
-ldaFit<-train(x = brand.train, 
+ldaFit<-train(x = brand_model.train, 
               y = make.names(train_without_events$group),
               method = "lda2",
               preProcess = c("center", "scale"),
               metric = "logLoss",
+              tuneLength = 10,
               trControl = ctrl)
+
+testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
 
 lm.age<-lm(age~phone_brand+device_model, data=train_without_events.top20)
 p.pred.age<-summary(lm.age)$coefficients[,4]
