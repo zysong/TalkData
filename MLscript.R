@@ -48,7 +48,7 @@ pred.test.without.events<-test_without_events[,-1]
 test_without_events.top20<-gender_age_test %>% left_join(brand_model.top20, by="device_id")
 pred.test.without.events.top20<-test_without_events.top20[,-1]
 
-models_byBrand_train <- train_without_events.top20 %>% group_by(phone_brand) %>% summarise(n_model=n_distinct(device_model))
+#models_byBrand_train <- train_without_events.top20 %>% group_by(phone_brand) %>% summarise(n_model=n_distinct(device_model))
 
 brands_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>% group_by(phone_brand) %>% 
   summarise(n_devices=n()) %>% arrange(desc(n_devices))
@@ -82,24 +82,15 @@ ldaFit<-train(x = brand_model.train,
 
 testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
 
-lm.age<-lm(age~phone_brand+device_model, data=train_without_events.top20)
+lm.age<-lm(train_without_events$age~., data=brand_model.train)
 p.pred.age<-summary(lm.age)$coefficients[,4]
-brands.age<-lm.age$xlevels$phone_brand[p.pred.age<0.05]
-models.age<-lm.age$xlevels$device_model[p.pred.age<0.05]
+brand_model.age<-names(lm.age$model)[p.pred.age<0.01][-1]
 
-lm.age.brand<-lm(age~phone_brand, data=train_without_events.top20)
-p.brand.age<-summary(lm.age.brand)$coefficients[,4]
-brands.age<-lm.age.brand$xlevels$phone_brand[p.brand.age<0.05]
-#age.pred<-predict(lm.age, pred.test.without.events)
-lm.age.model<-lm(age~device_model, data=train_without_events.top20)
-p.model.age<-summary(lm.age.model)$coefficients[,4]
-models.age<-lm.age.model$xlevels$device_model[p.brand<0.05]
-glm.gender.brand<-glm(gender~phone_brand, family = "binomial", data=train_without_events.top20)
-p.brand.gender<-summary(glm.gender.brand)$coefficients[,4]
-brands.gender<-glm.gender.brand$xlevels$phone_brand[p.brand.gender<0.05]
-glm.gender.model<-glm(gender~device_model, family = "binomial", data=train_without_events.top20)
-p.model.gender<-summary(glm.gender.model)$coefficients[,4]
-models.gender<-glm.gender.model$xlevels$device_model[p.model.gender<0.05]
+glm.gender<-glm(train_without_events$gender~., family = "binomial", data=brand_model.train)
+p.pred.gender<-summary(glm.gender)$coefficients[,4]
+brand_model.gender<-names(glm.gender$model)[p.pred.gender<0.01][-1]
+
+brand_model.selected<-unique(c(brand_model.age, brand_model.gender))
 
 lda.brand<-lda(group~phone_brand, data = train_without_events.top20, CV=TRUE)
 lda.brand_model<-lda(group~phone_brand+device_model, data = train_without_events.top20, CV=TRUE)
