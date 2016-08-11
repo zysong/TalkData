@@ -39,6 +39,7 @@ train_with_events<-inner_join(gender_age_train, pred, by="device_id")
 train_with_events$group<-make.names(train_with_events$group)
 pred.train<-train_with_events[,-(1:6)]
 train_without_events<-inner_join(gender_age_train, brand_model, by="device_id")
+train_without_events$group<-make.names(train_without_events$group)
 pred.train.without.events<-train_without_events[,-(1:4)]
 train_without_events.top20<-inner_join(gender_age_train, brand_model.top20, by="device_id")
 pred.train.without.events.top20<-train_without_events.top20[,-(1:4)]
@@ -67,7 +68,7 @@ brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, dev
 #brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
 #brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
 
-ctrl<-trainControl(method = "repeatedcv", number = 10, repeats = 3,
+ldaCtrl<-trainControl(method = "repeatedcv", number = 10, repeats = 3,
                    summaryFunction = multiClassSummary, classProbs = TRUE)
 set.seed(101)
 ldaFit<-train(x = brand_model.train, 
@@ -76,7 +77,7 @@ ldaFit<-train(x = brand_model.train,
               preProcess = c("center", "scale"),
               metric = "logLoss",
               tuneLength = 10,
-              trControl = ctrl)
+              trControl = ldaCtrl)
 
 testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
 
@@ -115,8 +116,11 @@ xgbCtrl<-trainControl(method = "cv", number = 10,
 
 xgbTune <- train(pred.train.wide, train_with_events$group, 
                  method = "xgbTree", 
+                 preProcess = c("center", "scale"),
                  tuneGrid = xgbGrid,
+                 metric = "logLoss",
                  trControl = xgbCtrl)
 
 plot(xgbTune, auto.key= list(columns = 2, lines = TRUE))
 varImp(xgbTune)
+xgbTune$bestTune
