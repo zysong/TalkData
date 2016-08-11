@@ -36,13 +36,14 @@ brand_model.top20$phone_brand[!(brand_model$phone_brand %in% top20brand$phone_br
 brand_model.top20$device_model[!(brand_model$device_model %in% top20model$device_model)]<-"minor_model"
 
 train_with_events<-inner_join(gender_age_train, pred, by="device_id")
-pred.train<-train_with_events[,-(1:5)]
+train_with_events$group<-make.names(train_with_events$group)
+pred.train<-train_with_events[,-(1:6)]
 train_without_events<-inner_join(gender_age_train, brand_model, by="device_id")
 pred.train.without.events<-train_without_events[,-(1:4)]
 train_without_events.top20<-inner_join(gender_age_train, brand_model.top20, by="device_id")
 pred.train.without.events.top20<-train_without_events.top20[,-(1:4)]
 test_with_events<-inner_join(gender_age_test, pred, by="device_id")
-pred.test<-test_with_events[,-(1:2)]
+pred.test<-test_with_events[,-(1:3)]
 test_without_events<-gender_age_test %>% left_join(brand_model, by="device_id")
 pred.test.without.events<-test_without_events[,-1]
 test_without_events.top20<-gender_age_test %>% left_join(brand_model.top20, by="device_id")
@@ -62,9 +63,6 @@ brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train
 brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.top20))
 brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
 brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
-brand.dummy<-dummyVars(~phone_brand, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
-brand.train<-as.data.frame(predict(brand.dummy, pred.train.without.events.top20))
-brand.train<-dplyr::select(brand.train, -phone_brandminor_brand)
 #brand_model.train.preProcess<-preProcess(brand_model.train)
 #brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
 #brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
@@ -73,7 +71,7 @@ ctrl<-trainControl(method = "repeatedcv", number = 10, repeats = 3,
                    summaryFunction = multiClassSummary, classProbs = TRUE)
 set.seed(101)
 ldaFit<-train(x = brand_model.train, 
-              y = make.names(train_without_events$group),
+              y = train_without_events$group,
               method = "lda2",
               preProcess = c("center", "scale"),
               metric = "logLoss",
@@ -90,14 +88,35 @@ glm.gender<-glm(train_without_events$gender~., family = "binomial", data=brand_m
 p.pred.gender<-summary(glm.gender)$coefficients[,4]
 brand_model.gender<-names(glm.gender$model)[p.pred.gender<0.01][-1]
 
+#Keep only the significant brands and models
 brand_model.selected<-unique(c(brand_model.age, brand_model.gender))
+brand_model.selected<-gsub("phone_brand", "", brand_model.selected) 
+brand_model.selected<-gsub("device_model", "", brand_model.selected) 
+pred.train$phone_brand[!(pred.train$phone_brand %in% brand_model.selected)]<-"other"
+pred.train$device_model[!(pred.train$device_model %in% brand_model.selected)]<-"other"
+pred.test$phone_brand[!(pred.test$phone_brand %in% brand_model.selected)]<-"other"
+pred.test$device_model[!(pred.test$device_model %in% brand_model.selected)]<-"other"
+pred.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train, pred.test))
+pred.train.dummies<-as.data.frame(predict(pred.dummy, newdata=pred.train))
+pred.test.dummies<-as.data.frame(predict(pred.dummy, newdata=pred.test))
+pred.train.wide<-cbind(dplyr::select(pred.train, -c(phone_brand, device_model)), pred.train.dummies)
+pred.test.wide<-cbind(dplyr::select(pred.test, -c(phone_brand, device_model)), pred.test.dummies)
 
-lda.brand<-lda(group~phone_brand, data = train_without_events.top20, CV=TRUE)
-lda.brand_model<-lda(group~phone_brand+device_model, data = train_without_events.top20, CV=TRUE)
+#train an xgboost model
+xgbGrid <- expand.grid(nrounds = seq(10, 100, by=10),
+                       eta = .1, 
+                       max_depth = c(6, 8, 10),
+                       gamma = .1,
+                       colsample_bytree = 1,
+                       min_child_weight = 1)
 
+xgbCtrl<-trainControl(method = "cv", number = 10,
+                   summaryFunction = multiClassSummary, classProbs = TRUE)
 
+xgbTune <- train(pred.train.wide, train_with_events$group, 
+                 method = "xgbTree", 
+                 tuneGrid = xgbGrid,
+                 trControl = xgbCtrl)
 
-
-
-rf.cv<- rfcv(brand_model.train, class.train.without.events, cv.fold=10)
-rf<-randomForest(pred.train, class.train, nree=1000, importance = TRUE)
+plot(xgbTune, auto.key= list(columns = 2, lines = TRUE))
+varImp(xgbTune)
