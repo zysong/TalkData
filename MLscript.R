@@ -67,8 +67,8 @@ brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, dev
 #brand_model.train.preProcess<-preProcess(brand_model.train)
 #brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
 #brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
-
-ldaCtrl<-trainControl(method = "repeatedcv", number = 10, repeats = 3,
+#train a lda model
+ldaCtrl<-trainControl(method = "cv", number = 10,
                    summaryFunction = multiClassSummary, classProbs = TRUE)
 set.seed(101)
 ldaFit<-train(x = brand_model.train, 
@@ -79,7 +79,30 @@ ldaFit<-train(x = brand_model.train,
               tuneLength = 10,
               trControl = ldaCtrl)
 
+plot(ldaFit, auto.key= list(columns = 2, lines = TRUE))
+
+#train an xgboost model
+xgbGrid0 <- expand.grid(nrounds = seq(20, 100, by=20),
+                       eta = .1, 
+                       max_depth = c(2,4,6),
+                       gamma = .1,
+                       colsample_bytree = 1,
+                       min_child_weight = 1)
+
+xgbCtrl0<-trainControl(method = "cv", number = 10,
+                      summaryFunction = multiClassSummary, classProbs = TRUE)
+
+xgbTune0 <- train(brand_model.train, train_without_events$group, 
+                 method = "xgbTree", 
+                 preProcess = c("center", "scale"),
+                 tuneGrid = xgbGrid0,
+                 metric = "logLoss",
+                 trControl = xgbCtrl0)
+
+plot(xgbTune0, auto.key= list(columns = 2, lines = TRUE))
+
 testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
+testProbs0<-cbind(test_without_events$device_id, testProbs)
 
 lm.age<-lm(train_without_events$age~., data=brand_model.train)
 p.pred.age<-summary(lm.age)$coefficients[,4]
@@ -104,9 +127,9 @@ pred.train.wide<-cbind(dplyr::select(pred.train, -c(phone_brand, device_model)),
 pred.test.wide<-cbind(dplyr::select(pred.test, -c(phone_brand, device_model)), pred.test.dummies)
 
 #train an xgboost model
-xgbGrid <- expand.grid(nrounds = seq(10, 100, by=10),
+xgbGrid <- expand.grid(nrounds = seq(20, 100, by=10),
                        eta = .1, 
-                       max_depth = c(6, 8, 10),
+                       max_depth = c(3, 4, 5),
                        gamma = .1,
                        colsample_bytree = 1,
                        min_child_weight = 1)
@@ -124,3 +147,14 @@ xgbTune <- train(pred.train.wide, train_with_events$group,
 plot(xgbTune, auto.key= list(columns = 2, lines = TRUE))
 varImp(xgbTune)
 xgbTune$bestTune
+
+sample_sub<-fread("./Data/sample_submission.csv")
+group.test.withEvents<-predict(xgbTune$finalModel, newdata=as.matrix(pred.test.wide)) %>% matrix(nrow=nrow(pred.test), ncol=12, byrow=TRUE)
+group.test.withEvents<-as.data.frame(group.test.withEvents)
+testProbs.withEvents<-cbind(test_with_events$device_id, group.test.withEvents)
+names(testProbs0)<-names(sample_sub)
+names(testProbs.withEvents)<-names(sample_sub)
+testProbs.noEvents<-anti_join(testProbs0, testProbs.withEvents, by="device_id")
+device_id_test<-data.frame(device_id=as.factor(sample_sub$device_id))
+df_sub<-rbind(testProbs.noEvents, testProbs.withEvents) %>% right_join(device_id_test, by="device_id")
+write.csv(df_sub, "submission.csv", row.names = FALSE)
