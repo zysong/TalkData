@@ -7,6 +7,8 @@ library(mice)
 library(MASS)
 require(bit64)
 require(e1071)
+require(doMC)
+require(pROC)
 
 pred<-fread("predictors.csv")
 pred$device_id<-as.character(pred$device_id)
@@ -67,6 +69,10 @@ brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, dev
 #brand_model.train.preProcess<-preProcess(brand_model.train)
 #brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
 #brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
+
+#register paralell computing
+library(doMC)
+registerDoMC(cores = 2)
 #train a lda model
 ldaCtrl<-trainControl(method = "cv", number = 10,
                    summaryFunction = multiClassSummary, classProbs = TRUE)
