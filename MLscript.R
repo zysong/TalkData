@@ -27,6 +27,12 @@ brand_model$device_model<-paste(brand_model$phone_brand, brand_model$device_mode
 
 n_byBrand<-brand_model %>% group_by(phone_brand) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
 n_byModel<-brand_model %>% group_by(device_model) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
+truncBrand<-function(percent){
+  n_byBrand[1:round(nrow(n_byBrand)*percent), 1]
+}
+truncModel<-function(percent){
+  n_byModel[1:round(nrow(n_byModel)*percent), 1]
+}
 top10brand<-n_byBrand[1:round(nrow(n_byBrand)/10), 1]
 top10model<-n_byModel[1:round(nrow(n_byModel)/10), 1]
 top20brand<-n_byBrand[1:round(nrow(n_byBrand)/5), 1]
