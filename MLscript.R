@@ -1,4 +1,5 @@
 library(dplyr)
+library(tidyr)
 library(caret)
 library(data.table)
 library(randomForest)
@@ -10,8 +11,9 @@ require(e1071)
 require(doMC)
 require(pROC)
 
-pred<-fread("predictors.csv")
+pred<-read.csv("predictors.csv")
 pred$device_id<-as.character(pred$device_id)
+pred$tot.hours<-rowSums(pred[17:40])
 
 gender_age_train<-fread("./Data/gender_age_train.csv", stringsAsFactors = TRUE)
 gender_age_train$device_id<-as.character(gender_age_train$device_id)
@@ -27,38 +29,102 @@ brand_model$device_model<-paste(brand_model$phone_brand, brand_model$device_mode
 
 n_byBrand<-brand_model %>% group_by(phone_brand) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
 n_byModel<-brand_model %>% group_by(device_model) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
-truncBrand<-function(percent){
-  n_byBrand[1:round(nrow(n_byBrand)*percent), 1]
-}
-truncModel<-function(percent){
-  n_byModel[1:round(nrow(n_byModel)*percent), 1]
-}
-top10brand<-n_byBrand[1:round(nrow(n_byBrand)/10), 1]
-top10model<-n_byModel[1:round(nrow(n_byModel)/10), 1]
-top20brand<-n_byBrand[1:round(nrow(n_byBrand)/5), 1]
-top20model<-n_byModel[1:round(nrow(n_byModel)/5), 1]
-brand_model.top10<-brand_model.top20<-brand_model
-brand_model.top10$phone_brand[!(brand_model$phone_brand %in% top10brand$phone_brand)]<-"minor_brand"
-brand_model.top10$device_model[!(brand_model$device_model %in% top10model$device_model)]<-"minor_model"
-brand_model.top20$phone_brand[!(brand_model$phone_brand %in% top20brand$phone_brand)]<-"minor_brand"
-brand_model.top20$device_model[!(brand_model$device_model %in% top20model$device_model)]<-"minor_model"
-
 train_with_events<-inner_join(gender_age_train, pred, by="device_id")
 train_with_events$group<-make.names(train_with_events$group)
 pred.train<-train_with_events[,-(1:6)]
 train_without_events<-inner_join(gender_age_train, brand_model, by="device_id")
 train_without_events$group<-make.names(train_without_events$group)
 pred.train.without.events<-train_without_events[,-(1:4)]
-train_without_events.top20<-inner_join(gender_age_train, brand_model.top20, by="device_id")
-pred.train.without.events.top20<-train_without_events.top20[,-(1:4)]
-test_with_events<-inner_join(gender_age_test, pred, by="device_id")
-pred.test<-test_with_events[,-(1:3)]
-test_without_events<-gender_age_test %>% left_join(brand_model, by="device_id")
-pred.test.without.events<-test_without_events[,-1]
-test_without_events.top20<-gender_age_test %>% left_join(brand_model.top20, by="device_id")
-pred.test.without.events.top20<-test_without_events.top20[,-1]
 
-#models_byBrand_train <- train_without_events.top20 %>% group_by(phone_brand) %>% summarise(n_model=n_distinct(device_model))
+#find the optimal truncation
+ldaResults<-data.frame()
+for (percent in (1:5)/10) {
+  ##truncate the brand and model lists
+  truncBrand<-n_byBrand[1:round(nrow(n_byBrand)*percent), 1]
+  truncModel<-n_byModel[1:round(nrow(n_byModel)*percent), 1]
+  brand_model.trunc<-brand_model
+  brand_model.trunc$phone_brand[!(brand_model$phone_brand %in% truncBrand$phone_brand)]<-"minor_brand"
+  brand_model.trunc$device_model[!(brand_model$device_model %in% truncModel$device_model)]<-"minor_model"
+  train_without_events.trunc<-inner_join(gender_age_train, brand_model.trunc, by="device_id")
+  pred.train.without.events.trunc<-train_without_events.trunc[,-(1:4)]
+  test_without_events.trunc<-gender_age_test %>% left_join(brand_model.trunc, by="device_id")
+  pred.test.without.events.trunc<-test_without_events.trunc[,-1]
+  brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.trunc, pred.test.without.events.trunc))
+  brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.trunc))
+  brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.trunc))
+  brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
+  brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
+  #register paralell computing
+  library(doMC)
+  registerDoMC(cores = 2)
+  #train a lda model
+  ldaCtrl<-trainControl(method = "cv", number = 10,
+                        summaryFunction = multiClassSummary, classProbs = TRUE)
+  ldaGrid<-expand.grid(dimen=1:5)
+  set.seed(101)
+  ldaFit<-train(x = brand_model.train, 
+                y = train_without_events$group,
+                method = "lda2",
+                preProcess = c("center", "scale"),
+                metric = "logLoss",
+                tuneGrid = ldaGrid,
+                trControl = ldaCtrl)
+  ldaResults<-rbind(ldaResults, cbind(ldaFit$results[,1:2], trunc=rep(percent, 5)))
+}
+#find the optimal parameters
+ldaResults.wide<-spread(ldaResults, trunc, logLoss)
+matlines(ldaResults.wide[,1], ldaResults.wide[,-1])
+percent<-.1
+dimen<-3
+#run the lda model again with the chosen parameters
+truncBrand<-n_byBrand[1:round(nrow(n_byBrand)*percent), 1]
+truncModel<-n_byModel[1:round(nrow(n_byModel)*percent), 1]
+brand_model.trunc<-brand_model
+brand_model.trunc$phone_brand[!(brand_model$phone_brand %in% truncBrand$phone_brand)]<-"minor_brand"
+brand_model.trunc$device_model[!(brand_model$device_model %in% truncModel$device_model)]<-"minor_model"
+train_without_events.trunc<-inner_join(gender_age_train, brand_model.trunc, by="device_id")
+pred.train.without.events.trunc<-train_without_events.trunc[,-(1:4)]
+test_without_events.trunc<-gender_age_test %>% left_join(brand_model.trunc, by="device_id")
+pred.test.without.events.trunc<-test_without_events.trunc[,-1]
+brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.trunc, pred.test.without.events.trunc))
+brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.trunc))
+brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.trunc))
+brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
+brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
+#train a lda model
+ldaCtrl<-trainControl(method = "cv", number = 10,
+                      summaryFunction = multiClassSummary, classProbs = TRUE)
+ldaGrid<-expand.grid(dimen=dimen)
+set.seed(101)
+ldaFit<-train(x = brand_model.train, 
+              y = train_without_events$group,
+              method = "lda2",
+              preProcess = c("center", "scale"),
+              metric = "logLoss",
+              tuneGrid = ldaGrid,
+              trControl = ldaCtrl)
+group.test<-predict(ldaFit, newdata=brand_model.test, type="prob")
+write.csv(group.test, "group_test_no_events.csv")
+
+#train an xgboost model
+#xgbGrid0 <- expand.grid(nrounds = seq(20, 100, by=20),
+#                       eta = .1, 
+#                       max_depth = c(2,4,6),
+#                       gamma = .1,
+#                       colsample_bytree = 1,
+#                       min_child_weight = 1)
+
+#xgbCtrl0<-trainControl(method = "cv", number = 10,
+#                      summaryFunction = multiClassSummary, classProbs = TRUE)
+
+#xgbTune0 <- train(brand_model.train, train_without_events$group, 
+#                 method = "xgbTree", 
+#                 preProcess = c("center", "scale"),
+#                 tuneGrid = xgbGrid0,
+#                 metric = "logLoss",
+#                 trControl = xgbCtrl0)
+
+#plot(xgbTune0, auto.key= list(columns = 2, lines = TRUE))
 
 brands_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>% group_by(phone_brand) %>% 
   summarise(n_devices=n()) %>% arrange(desc(n_devices))
@@ -66,52 +132,6 @@ models_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>%
   summarise(n_devices=n()) %>% arrange(desc(n_devices))
 brands_test_only<-n_byBrand %>% semi_join(test_without_events, by="phone_brand") %>% anti_join(train_without_events, by="phone_brand")
 models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model") %>% anti_join(train_without_events, by="device_model")
-
-brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.top20, pred.test.without.events.top20))
-brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.top20))
-brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.top20))
-brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
-brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
-#brand_model.train.preProcess<-preProcess(brand_model.train)
-#brand_model.train.scaled<-predict(brand_model.train.preProcess, brand_model.train)
-#brand_model.test.scaled<-predict(brand_model.train.preProcess, brand_model.test)
-
-#register paralell computing
-library(doMC)
-registerDoMC(cores = 2)
-#train a lda model
-ldaCtrl<-trainControl(method = "cv", number = 10,
-                   summaryFunction = multiClassSummary, classProbs = TRUE)
-set.seed(101)
-ldaFit<-train(x = brand_model.train, 
-              y = train_without_events$group,
-              method = "lda2",
-              preProcess = c("center", "scale"),
-              metric = "logLoss",
-              tuneLength = 10,
-              trControl = ldaCtrl)
-
-plot(ldaFit, auto.key= list(columns = 2, lines = TRUE))
-
-#train an xgboost model
-xgbGrid0 <- expand.grid(nrounds = seq(20, 100, by=20),
-                       eta = .1, 
-                       max_depth = c(2,4,6),
-                       gamma = .1,
-                       colsample_bytree = 1,
-                       min_child_weight = 1)
-
-xgbCtrl0<-trainControl(method = "cv", number = 10,
-                      summaryFunction = multiClassSummary, classProbs = TRUE)
-
-xgbTune0 <- train(brand_model.train, train_without_events$group, 
-                 method = "xgbTree", 
-                 preProcess = c("center", "scale"),
-                 tuneGrid = xgbGrid0,
-                 metric = "logLoss",
-                 trControl = xgbCtrl0)
-
-plot(xgbTune0, auto.key= list(columns = 2, lines = TRUE))
 
 testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
 testProbs0<-cbind(test_without_events$device_id, testProbs)
