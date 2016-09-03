@@ -18,7 +18,7 @@ events$event_id<-as.character(events$event_id)
 #events_byDate<-group_by(events, date) %>% summarise(n())
 events$hour<-as.POSIXlt(events$timestamp)$hour
 #events_byHour<-group_by(events, hour) %>% summarise(n())
-events<-select(events, -timestamp)
+events<-dplyr::select(events, -timestamp)
 #identify missing location data
 events$longitude[events$longitude==0.00]<-NA
 events$latitude[events$latitude==0.00]<-NA
@@ -58,7 +58,7 @@ app_events$app_id<-as.character(app_events$app_id)
 app_label<-fread("./Data/app_labels.csv")
 app_label$app_id<-as.character(app_label$app_id)
 #head(app_events, 10)
-device_apps<-events %>% select(c(device_id, event_id)) %>% 
+device_apps<-events %>% dplyr::select(c(device_id, event_id)) %>% 
   inner_join(app_events, by = "event_id")
 remove(app_events)
 #count the total number of installed/active apps per device
@@ -67,7 +67,7 @@ device_apps_installed <-device_apps %>% group_by(device_id) %>%
 device_apps_active <-device_apps %>% filter(is_active==1) %>% group_by(device_id) %>% 
   summarise(n_app_active= n_distinct(app_id))
 #installed apps
-device_labels_installed <- device_apps %>% select(device_id, app_id) %>% distinct() %>% 
+device_labels_installed <- device_apps %>% dplyr::select(device_id, app_id) %>% distinct() %>% 
   inner_join(app_label, by="app_id")
 installation_byDeviceLabel <- device_labels_installed %>% group_by(device_id, label_id) %>% 
   summarise(n_app=n())
@@ -79,7 +79,7 @@ names(label_installed_wide)[1]<-'device_id'
 label_installed_wide$device_id<-as.character(label_installed_wide$device_id)
 remove(device_labels_installed, installation_byDeviceLabel)
 #active apps
-device_labels_active <- device_apps %>% select(device_id, app_id, is_active) %>% 
+device_labels_active <- device_apps %>% dplyr::select(device_id, app_id, is_active) %>% 
   inner_join(app_label, by="app_id")
 active_byDeviceLabel <- device_labels_active %>% group_by(device_id, label_id) %>% 
   summarise(n_app=sum(is_active))
@@ -87,8 +87,8 @@ active_byDeviceLabel <- device_labels_active %>% group_by(device_id, label_id) %
 #  arrange(desc(n_app)) %>% summarise(label1=label_id[1])
 label_active_wide<-dcast(active_byDeviceLabel, as.factor(device_id)~as.factor(label_id), 
                          value.var="n_app", fill=0)
-label_active_wide$device_id<-as.character(label_active_wide$device_id)
 names(label_active_wide)[1]<-'device_id'
+label_active_wide$device_id<-as.character(label_active_wide$device_id)
 remove(device_labels_active, active_byDeviceLabel)
 
 #clean memory
@@ -102,8 +102,8 @@ sd.active<-apply(label_active_wide[,-1], 2, sd)
 sd.active[sd.active==0]<-1
 pca.label.active<-prcomp(label_active_wide[,-1], scale. = sd.active, center = TRUE)
 #screeplot(pca.label.active)
-device_label_pc<-as.data.frame(cbind(pca.label.installed$x[,1:5], pca.label.active$x[,1:5]))
-names(device_label_pc)<- c(paste0(rep("PC", 5), 1:5, ".ins"), paste0(rep("PC", 5), 1:5, ".act"))
+device_label_pc<-as.data.frame(cbind(pca.label.installed$x[,1:10], pca.label.active$x[,1:10]))
+names(device_label_pc)<- c(paste0(rep("PC", 5), 1:10, ".ins"), paste0(rep("PC", 5), 1:10, ".act"))
 device_label_pc$device_id<-label_active_wide$device_id
 
 #find the most common category
@@ -131,11 +131,10 @@ md.pattern(pred)
 #missing data
 pred$n_app_active[is.na(pred$n_app_active)]<-0
 pred<-pred %>% subset(!is.na(n_app_installed))
-pred.no.idx<-select(pred, -device_id)
+pred.no.idx<-dplyr::select(pred, -device_id)
 set.seed(100)
 pred.imp<-mice(pred.no.idx, m = 1)
-pred.com<-complete(pred.imp)
+pred.com<-mice::complete(pred.imp)
 pred<-cbind(device_id=pred$device_id, pred.com)
-remove(pred.imp)
 
 write.csv(pred, "predictors.csv")

@@ -1,3 +1,4 @@
+require(plyr)
 library(dplyr)
 library(tidyr)
 library(caret)
@@ -11,9 +12,8 @@ require(e1071)
 require(doMC)
 require(pROC)
 
-pred<-read.csv("predictors.csv")
-pred$device_id<-as.character(pred$device_id)
-pred$tot.hours<-rowSums(pred[17:40])
+pred<-fread("predictors.csv")
+pred$tot.hours<-rowSums(dplyr::select(pred, h0:h23))
 
 gender_age_train<-fread("./Data/gender_age_train.csv", stringsAsFactors = TRUE)
 gender_age_train$device_id<-as.character(gender_age_train$device_id)
@@ -29,12 +29,14 @@ brand_model$device_model<-paste(brand_model$phone_brand, brand_model$device_mode
 
 n_byBrand<-brand_model %>% group_by(phone_brand) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
 n_byModel<-brand_model %>% group_by(device_model) %>% summarise(n_devices=n()) %>% arrange(desc(n_devices))
-train_with_events<-inner_join(gender_age_train, pred, by="device_id")
+train_with_events<-gender_age_train[pred, nomatch=0L, on="device_id"]
 train_with_events$group<-make.names(train_with_events$group)
-pred.train<-train_with_events[,-(1:6)]
-train_without_events<-inner_join(gender_age_train, brand_model, by="device_id")
+pred.train<-train_with_events[,-(1:5),with=FALSE]
+test_with_events<-gender_age_test[pred, nomatch=0L, on="device_id"]
+pred.test<-test_with_events[,-(1:2),with=FALSE]
+train_without_events<-gender_age_train[brand_model, nomatch=0L, on="device_id"]
 train_without_events$group<-make.names(train_without_events$group)
-pred.train.without.events<-train_without_events[,-(1:4)]
+pred.train.without.events<-train_without_events[,-(1:4),with=FALSE]
 
 #find the optimal truncation
 ldaResults<-data.frame()
@@ -47,13 +49,9 @@ for (percent in (1:5)/10) {
   brand_model.trunc$device_model[!(brand_model$device_model %in% truncModel$device_model)]<-"minor_model"
   train_without_events.trunc<-inner_join(gender_age_train, brand_model.trunc, by="device_id")
   pred.train.without.events.trunc<-train_without_events.trunc[,-(1:4)]
-  test_without_events.trunc<-gender_age_test %>% left_join(brand_model.trunc, by="device_id")
-  pred.test.without.events.trunc<-test_without_events.trunc[,-1]
   brand_model.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train.without.events.trunc, pred.test.without.events.trunc))
   brand_model.train<-as.data.frame(predict(brand_model.dummy, newdata = pred.train.without.events.trunc))
-  brand_model.test<-as.data.frame(predict(brand_model.dummy, newdata = pred.test.without.events.trunc))
   brand_model.train<-dplyr::select(brand_model.train, -c(phone_brandminor_brand, device_modelminor_model))
-  brand_model.test<-dplyr::select(brand_model.test, -c(phone_brandminor_brand, device_modelminor_model))
   #register paralell computing
   library(doMC)
   registerDoMC(cores = 2)
@@ -103,8 +101,10 @@ ldaFit<-train(x = brand_model.train,
               metric = "logLoss",
               tuneGrid = ldaGrid,
               trControl = ldaCtrl)
-group.test<-predict(ldaFit, newdata=brand_model.test, type="prob")
-write.csv(group.test, "group_test_no_events.csv")
+
+testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
+testProbs0<-cbind(test_without_events.trunc$device_id, testProbs)
+write.csv(testProbs0, "group_test_no_events.csv")
 
 #train an xgboost model
 #xgbGrid0 <- expand.grid(nrounds = seq(20, 100, by=20),
@@ -133,8 +133,6 @@ models_train<-brand_model %>% semi_join(train_with_events, by = "device_id") %>%
 brands_test_only<-n_byBrand %>% semi_join(test_without_events, by="phone_brand") %>% anti_join(train_without_events, by="phone_brand")
 models_test_only<-n_byModel %>% semi_join(test_without_events, by="device_model") %>% anti_join(train_without_events, by="device_model")
 
-testProbs<-predict(ldaFit, newdata=brand_model.test, type = "prob")
-testProbs0<-cbind(test_without_events$device_id, testProbs)
 
 lm.age<-lm(train_without_events$age~., data=brand_model.train)
 p.pred.age<-summary(lm.age)$coefficients[,4]
@@ -145,21 +143,29 @@ p.pred.gender<-summary(glm.gender)$coefficients[,4]
 brand_model.gender<-names(glm.gender$model)[p.pred.gender<0.01][-1]
 
 #Keep only the significant brands and models
-brand_model.selected<-unique(c(brand_model.age, brand_model.gender))
+brand_model.selected<-unique(c(names(brand_model.train), names(brand_model.test)))
 brand_model.selected<-gsub("phone_brand", "", brand_model.selected) 
-brand_model.selected<-gsub("device_model", "", brand_model.selected) 
+brand_model.selected<-gsub("device_model", "", brand_model.selected)
+pred.train$phone_brand<-as.character(pred.train$phone_brand)
+pred.train$device_model<-as.character(pred.train$device_model)
+pred.test$phone_brand<-as.character(pred.test$phone_brand)
+pred.test$device_model<-as.character(pred.test$device_model)
 pred.train$phone_brand[!(pred.train$phone_brand %in% brand_model.selected)]<-"other"
 pred.train$device_model[!(pred.train$device_model %in% brand_model.selected)]<-"other"
 pred.test$phone_brand[!(pred.test$phone_brand %in% brand_model.selected)]<-"other"
 pred.test$device_model[!(pred.test$device_model %in% brand_model.selected)]<-"other"
+
 pred.dummy<-dummyVars(~phone_brand+device_model, data=rbind(pred.train, pred.test))
 pred.train.dummies<-as.data.frame(predict(pred.dummy, newdata=pred.train))
 pred.test.dummies<-as.data.frame(predict(pred.dummy, newdata=pred.test))
-pred.train.wide<-cbind(dplyr::select(pred.train, -c(phone_brand, device_model)), pred.train.dummies)
-pred.test.wide<-cbind(dplyr::select(pred.test, -c(phone_brand, device_model)), pred.test.dummies)
+pred.train.wide<-cbind(pred.train[,c("phone_brand", "device_model"):=NULL], pred.train.dummies)
+pred.test.wide<-cbind(pred.test[,c("phone_brand", "device_model"):=NULL], pred.test.dummies)
 
 #train an xgboost model
-xgbGrid <- expand.grid(nrounds = seq(20, 100, by=10),
+library(doMC)
+registerDoMC(cores = 2)
+set.seed(101)
+xgbGrid <- expand.grid(nrounds = seq(20, 100, by=20),
                        eta = .1, 
                        max_depth = c(3, 4, 5),
                        gamma = .1,
